@@ -195,3 +195,98 @@ O erro de compilação do Android foi causado por um bloco antigo de configuraç
 ### Status Atual
 
 - Concluído
+
+
+## Entrada 6
+
+### Solicitação/Requisição
+
+"A aplicação usa `flutter_local_notifications` e em Android está quebrando com erro de alarme exato não permitido. A correção precisa impedir crash e tratar o caso de permissão negada de forma segura."
+
+### Resumo da Decisão
+
+O problema é específico do Android 12+ e exige permissão de `SCHEDULE_EXACT_ALARM` para agendamento exato. Como o projeto também deve continuar funcionando quando a permissão for negada, a solução foi: solicitar a permissão quando disponível, tentar agendamento exato quando concedida e usar modo inexacto como fallback seguro quando a permissão não for permitida.
+
+### Ações Executadas
+
+- Ajustado `NotificationService` para verificar `Permission.scheduleExactAlarm` antes do agendamento.
+- Adicionado fallback para `AndroidScheduleMode.inexactAllowWhileIdle` em caso de exceção.
+- Adicionados os `uses-permission` necessários no `AndroidManifest.xml`.
+- Atualizado o histórico de desenvolvimento.
+
+### Resultado
+
+- A app deixa de quebrar ao tentar criar notificação sem permissão de alarme exato.
+- O app continua funcionando com fallback seguro, evitando travamento e mantendo o fluxo de lembretes funcional.
+
+### Problemas/Erros
+
+- `PlatformException(exact_alarms_not_permitted, Exact alarms are not permitted, null, null)` no Android.
+
+### Tentativas de Correção
+
+- Solicitação de permissão de alarme exato.
+- Tratamento de exceção do método de agendamento.
+- Uso de agendamento inexacto quando a permissão não é concedida.
+
+### Status Atual
+
+- Concluído
+
+## Entrada 7
+
+### Solicitação/Requisição
+
+"A data e a hora da tarefa estão corretas, mas a notificação não aparece no Android."
+
+### Resumo da Decisão
+
+O fluxo descartava tarefas no limite do horário atual e a solicitação de permissões era feita por uma biblioteca diferente da responsável pelo agendamento. O serviço passou a solicitar as permissões diretamente pelo `flutter_local_notifications` e a aceitar tarefas no horário atual com uma margem curta, agendando-as para um segundo depois.
+
+### Ações Executadas
+
+- Ajustado o `NotificationService` para usar `requestNotificationsPermission()` e `requestExactAlarmsPermission()` do plugin de notificações.
+- Alterada a validação para cancelar somente tarefas vencidas há mais de cinco segundos.
+- Mantido o fallback para `inexactAllowWhileIdle` quando o alarme exato não está autorizado.
+- Ajustado o `TaskStore` para usar a mesma margem de cinco segundos.
+- Verificado que o emulador Android `sdk gphone16k x86 64` está conectado.
+
+### Resultado
+
+- `flutter build apk --debug` concluído com sucesso.
+- `flutter analyze` sem erros de compilação; apenas avisos preexistentes de lint/depreciação.
+- O teste final de disparo precisa ser executado no emulador conectado, usando uma tarefa dois minutos à frente.
+
+### Status Atual
+
+- Correção implementada e compilada
+- Validação de disparo no Android pendente
+
+## Entrada 8
+
+### Solicitação/Requisição
+
+"A notificação continua sem aparecer mesmo com a data e a hora corretas."
+
+### Diagnóstico Confirmado
+
+O alarme do Android estava sendo registrado e disparado, mas a inicialização ficava aguardando a autorização de notificações do sistema. Depois que a permissão foi concedida no emulador, o canal da aplicação foi criado corretamente.
+
+### Ações Executadas
+
+- Inspecionado o estado real do Android com `adb`, confirmando o receptor `ScheduledNotificationReceiver`.
+- Confirmado que `POST_NOTIFICATIONS` precisa estar concedido.
+- Criado explicitamente o canal `todo_task_reminders_v2` com importância máxima, som e vibração.
+- Instalado e compilado novamente o APK debug.
+- Concedida a permissão no emulador e verificada a criação do canal pelo `dumpsys notification`.
+
+### Resultado
+
+- Canal confirmado no Android: `todo_task_reminders_v2`.
+- O emulador está pronto para testar uma tarefa futura.
+- Em um aparelho real, é necessário aceitar a permissão de notificações quando o sistema solicitar ou ativá-la em Configurações > Apps > todo_app > Notificações.
+
+### Status Atual
+
+- Permissão e canal corrigidos
+- Teste final de disparo de uma nova tarefa pendente

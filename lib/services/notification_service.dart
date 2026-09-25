@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -30,25 +31,45 @@ class NotificationService {
     await _plugin.initialize(settings);
 
     if (Platform.isAndroid) {
-      final status = await Permission.notification.status;
-      if (!status.isGranted) {
-        await Permission.notification.request();
-      }
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'todo_task_reminders_v2',
+          'Lembretes de tarefas',
+          description: 'Notificações de vencimento de tarefas',
+          importance: Importance.max,
+          playSound: true,
+          enableVibration: true,
+        ),
+      );
+      await androidPlugin?.requestNotificationsPermission();
+      await androidPlugin?.requestExactAlarmsPermission();
     }
   }
 
   Future<void> scheduleTask(Task task) async {
     final dueDate = task.dueDateTime;
-    if (dueDate == null || task.completed || dueDate.isBefore(DateTime.now())) {
+    final now = DateTime.now();
+    if (dueDate == null || task.completed) {
+      await cancelTask(task);
+      return;
+    }
+
+    if (dueDate.isBefore(now.subtract(const Duration(seconds: 5)))) {
       await cancelTask(task);
       return;
     }
 
     final notificationId = task.notificationId ?? task.id ?? DateTime.now().millisecondsSinceEpoch;
-    final scheduledDate = tz.TZDateTime.from(dueDate, tz.local);
+    final scheduledDate = tz.TZDateTime.from(
+      dueDate.isAfter(now) ? dueDate : now.add(const Duration(seconds: 1)),
+      tz.local,
+    );
+    final androidScheduleMode = await _resolveAndroidScheduleMode();
 
     const androidDetails = AndroidNotificationDetails(
-      'todo_task_reminders',
+      'todo_task_reminders_v2',
       'Lembretes de tarefas',
       channelDescription: 'Notificações de vencimento de tarefas',
       importance: Importance.max,
@@ -58,16 +79,42 @@ class NotificationService {
     const iosDetails = DarwinNotificationDetails();
     const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
 
-    await _plugin.zonedSchedule(
-      notificationId,
-      'Lembrete da tarefa',
-      'Tarefa: ${task.title}',
-      scheduledDate,
-      details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-    );
+    try {
+      await _plugin.zonedSchedule(
+        notificationId,
+        'Lembrete da tarefa',
+        'Tarefa: ${task.title}',
+        scheduledDate,
+        details,
+        androidScheduleMode: androidScheduleMode,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } on PlatformException catch (_) {
+      await _plugin.zonedSchedule(
+        notificationId,
+        'Lembrete da tarefa',
+        'Tarefa: ${task.title}',
+        scheduledDate,
+        details,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
+  }
+
+  Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
+    if (!Platform.isAndroid) {
+      return AndroidScheduleMode.exactAllowWhileIdle;
+    }
+
+    final exactAlarmPermission = await Permission.scheduleExactAlarm.status;
+    if (exactAlarmPermission.isGranted) {
+      return AndroidScheduleMode.exactAllowWhileIdle;
+    }
+
+    return AndroidScheduleMode.inexactAllowWhileIdle;
   }
 
   Future<void> cancelTask(Task task) async {

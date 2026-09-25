@@ -152,7 +152,10 @@ class TaskStore extends ChangeNotifier {
       return;
     }
 
-    if (task.dueDateTime != null && !task.completed && task.dueDateTime!.isAfter(DateTime.now())) {
+    final now = DateTime.now();
+    if (task.dueDateTime != null &&
+        !task.completed &&
+        !task.dueDateTime!.isBefore(now.subtract(const Duration(seconds: 5)))) {
       final notificationId = task.notificationId ?? task.id!;
       final scheduledTask = task.copyWith(notificationId: notificationId);
       await _notificationService.scheduleTask(scheduledTask);
